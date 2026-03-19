@@ -8,6 +8,7 @@ from bean.model.parser import parse_args as get_run_parser
 from bean.framework.parser import get_input_parser as get_create_screen_parser
 from bean.annotate.utils import get_splice_parser as get_splice_site_parser
 from bean.model.parser_prior import parse_args as get_prior_parser
+from bean.fuse.parser import add_fuse_args as get_fuse_parser
 from bean.cli.count import main as count
 from bean.cli.count_samples import main as count_samples
 from bean.cli.profile import main as profile
@@ -17,6 +18,7 @@ from bean.cli.run import main as run
 from bean.cli.create_screen import main as create_screen
 from bean.cli.get_splice_sites import main as get_splice_sites
 from bean.cli.build_prior import main as build_prior
+from bean.cli.fuse import main as fuse
 
 import warnings
 
@@ -54,6 +56,11 @@ def get_parser():
         "build-prior", help="obtain prior_params.pkl for batched runs"
     )
     prior_parser = get_prior_parser(prior_parser)
+    fuse_parser = subparsers.add_parser(
+        "fuse",
+        help="compute FUSE scores from a bean element result CSV",
+    )
+    fuse_parser = get_fuse_parser(fuse_parser)
     return parser
 
 
@@ -81,5 +88,7 @@ def main() -> None:
         get_splice_sites(args)
     elif args.subcommand == "build-prior":
         build_prior(args)
+    elif args.subcommand == "fuse":
+        fuse(args)
     else:
         parser.print_help()

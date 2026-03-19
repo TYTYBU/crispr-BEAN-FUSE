@@ -23,6 +23,7 @@
 3. [`qc`](https://pinellolab.github.io/crispr-bean/qc.html): Quality control report and filtering out / masking of aberrant sample and guides  
 4. [`filter`](https://pinellolab.github.io/crispr-bean/filter.html): Filter reporter alleles; essential for `tiling` mode that allows for all alleles generated from gRNA.
 5. [`run`](https://pinellolab.github.io/crispr-bean/run.html): Quantify targeted variants' effect sizes from screen data. **See more about the [model](https://pinellolab.github.io/crispr-bean/model.html) & [output](https://pinellolab.github.io/crispr-bean/run.html#output)**
+6. `fuse`: Compute **FUSE** (Functional Score Using Structural Ensemble) scores from a `bean run` element result CSV. Denoises per-variant functional scores by combining a James-Stein positional estimate with FUNSUM substitution matrix scores. Optionally uses secondary-structure-specific FUNSUM when a DSSP file is supplied.
 * Screen data is saved as [`ReporterScreen` object](https://pinellolab.github.io/crispr-bean/reporterscreen.html) in the pipeline.
 BEAN stores mapped gRNA and allele counts in `ReporterScreen` object which is compatible with [AnnData](https://anndata.readthedocs.io/en/latest/index.html). 
 
@@ -55,6 +56,8 @@ See the [documentation](https://pinellolab.github.io/crispr-bean/) for tutorials
 
 Also see notebook that visualizes screen analysis result [here](https://github.com/pinellolab/crispr-bean/blob/main/docs/visualize_var.ipynb).
 
+For a complete end-to-end walkthrough of the full pipeline including `bean fuse`, see [`crispr_bean_workflow.ipynb`](crispr_bean_workflow.ipynb).
+
 
 ### Library design: variant or tiling?
 The `bean filter` and `bean run` steps depend on the type of gRNA library design, where BEAN supports two modes of running.
@@ -77,6 +80,29 @@ import bean as be
 cdata = be.read_h5ad("bean_counts_sample.h5ad")
 ```
 Python package `bean` supports multiple data wrangling functionalities for `ReporterScreen` objects. See the [**ReporterScreen API tutorial**](docs/ReporterScreen_api.ipynb) for more detail.
+
+## `bean fuse` — FUSE score computation
+
+For coding tiling screens, `bean fuse` denoises per-variant scores from `bean run` using the FUNSUM substitution matrix and optional protein secondary structure.
+
+```bash
+# Basic usage (auto-detects mu_z_adj or mu_z as the raw score)
+bean fuse bean_element_result.MixtureNormal.csv -o results/
+
+# With secondary-structure-specific FUNSUM and mu_sd filter
+bean fuse bean_element_result.MixtureNormal.csv \
+  --dss structure.dss \
+  --mu-sd-max 1.0 \
+  -o results/
+
+# Exclude stop-gain variants
+bean fuse bean_element_result.MixtureNormal.csv \
+  --exclude-lof \
+  --dss structure.dss \
+  -o results/
+```
+
+Output columns: `gene`, `aapos`, `aaref`, `aaalt`, `functional_class`, `raw_score`, `norm_raw_score`, `pos_score`, `sub_score`, `sub_score_ss`, `FUSE_score`, `FUSE_SS_score`.
 
 ## Run time
 * Installation takes 14.4 mins after pytorch installation with pytorch in Dell XPS 13 Ubuntu WSL.
