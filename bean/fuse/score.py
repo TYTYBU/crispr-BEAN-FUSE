@@ -32,6 +32,7 @@ from .utils import (
     extract_aa_columns,
     james_stein,
     normalize_scoreset,
+    to_one_letter,
 )
 
 logger = logging.getLogger(__name__)
@@ -143,6 +144,7 @@ def calculate_fuse_scores(
     include_lof: bool = True,
     dss_path: Optional[str] = None,
     dssp_offset: int = 0,
+    target_decoder: Optional[str] = None,
     pos_mean_method: str = "js",
     lower_bound: float = 0.1,
     upper_bound: float = 0.9,
@@ -179,6 +181,13 @@ def calculate_fuse_scores(
         numbered from the mature protein but ``aapos`` counts from the precursor
         (including signal peptide).  For example, ``dssp_offset=21`` shifts PDB
         residue 1 → ``aapos`` 22.  Default: ``0`` (no adjustment).
+    target_decoder:
+        Path to a CSV file that maps the ``target`` column to amino-acid
+        coordinates.  Required columns: ``target``, ``aapos``, ``aaref``,
+        ``aaalt`` (use ``Z`` or ``*`` for stop-gain).  Provide this when
+        ``bean run`` was run without the ``bean filter`` AA-translation step,
+        leaving ``target`` in a non-parseable format (e.g. ``16200_G_D``).
+        When supplied, edit-string parsing is skipped entirely.
     pos_mean_method:
         Method for computing the positional component.  Fixed to ``"js"``
         (James-Stein shrinkage) by default.
@@ -228,12 +237,51 @@ def calculate_fuse_scores(
             )
 
     # ------------------------------------------------------------------
-    # 4. Parse edit strings → aapos, aaref, aaalt
+    # 4. Resolve aapos / aaref / aaalt
+    #    Two paths:
+    #      A. target_decoder CSV  – merge on "target" column (no string parsing)
+    #      B. edit-string parsing – parse "[gene:]pos:ref>alt" from edit_col
     # ------------------------------------------------------------------
-    df = extract_aa_columns(df_raw, edit_col)
-    df = df.rename(columns={score_col: "raw_score"})
+    df = df_raw.rename(columns={score_col: "raw_score"}).copy()
 
-    # Drop rows with unparseable edits or aapos ≤ 0
+    if target_decoder is not None:
+        logger.info(f"Loading target decoder from '{target_decoder}'.")
+        df_dec = pd.read_csv(target_decoder)
+        required_dec_cols = {"target", "aapos", "aaref", "aaalt"}
+        missing_dec = required_dec_cols - set(df_dec.columns)
+        if missing_dec:
+            raise ValueError(
+                f"target_decoder is missing required columns: {missing_dec}. "
+                f"Found: {df_dec.columns.tolist()}"
+            )
+        # Normalise stop-codon encoding: Z → *
+        def _norm_aa(x):
+            try:
+                return to_one_letter(str(x))
+            except (ValueError, TypeError):
+                return np.nan
+
+        df_dec["aaref"] = df_dec["aaref"].map(_norm_aa)
+        df_dec["aaalt"] = df_dec["aaalt"].map(_norm_aa)
+        df_dec["aapos"] = pd.to_numeric(df_dec["aapos"], errors="coerce").astype("Int64")
+
+        n_before = len(df)
+        df = df.merge(
+            df_dec[["target", "aapos", "aaref", "aaalt"]],
+            on="target",
+            how="left",
+        )
+        n_unmatched = df["aapos"].isna().sum()
+        if n_unmatched:
+            logger.info(
+                f"{n_unmatched}/{n_before} rows had no match in target_decoder "
+                "and will be excluded."
+            )
+    else:
+        # Parse edit strings → aapos, aaref, aaalt
+        df = extract_aa_columns(df, edit_col)
+
+    # Drop rows with missing AA info or aapos ≤ 0
     valid = (
         df["aapos"].notna()
         & df["aaref"].notna()
@@ -246,10 +294,17 @@ def calculate_fuse_scores(
     df = df[valid].copy()
 
     if df.empty:
+        if target_decoder is not None:
+            raise ValueError(
+                "No valid amino-acid variants remain after merging target_decoder. "
+                "Check that the 'target' values in the decoder match those in the input CSV."
+            )
         raise ValueError(
             "No valid amino-acid variants remain after parsing the edit column. "
             f"Check that '{edit_col}' contains strings in the format "
-            "'[gene:]pos:ref>alt' or 'aa_part|nt_part'."
+            "'[gene:]pos:ref>alt' or 'aa_part|nt_part'.  "
+            "If your target column uses a different format (e.g. '16200_G_D'), "
+            "supply a target decoder CSV with --target-decoder."
         )
 
     # ------------------------------------------------------------------
@@ -258,12 +313,15 @@ def calculate_fuse_scores(
     if gene_name:
         df["gene"] = gene_name
     elif "gene" not in df.columns:
-        # Try to infer from edit strings like "LDLR:123:A>G"
-        def _extract_gene(s: str) -> str:
-            parts = s.split("|")[0].split(":")
-            return parts[0] if len(parts) == 3 else "gene"
+        if target_decoder is not None:
+            df["gene"] = "gene"
+        else:
+            # Try to infer from edit strings like "LDLR:123:A>G"
+            def _extract_gene(s: str) -> str:
+                parts = s.split("|")[0].split(":")
+                return parts[0] if len(parts) == 3 else "gene"
 
-        df["gene"] = df[edit_col].map(_extract_gene)
+            df["gene"] = df[edit_col].map(_extract_gene)
 
     # ------------------------------------------------------------------
     # 6. Annotate functional class & filter LOF if needed

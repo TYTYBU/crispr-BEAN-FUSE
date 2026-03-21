@@ -31,7 +31,24 @@ def add_fuse_args(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
         help=(
             "Column in the input CSV containing amino-acid edit strings in the "
             "format ``[gene:]pos:ref>alt`` or the CodingNoncodingAllele format "
-            "``aa_part|nt_part``.  Default: ``target``."
+            "``aa_part|nt_part``.  Ignored when ``--target-decoder`` is supplied.  "
+            "Default: ``target``."
+        ),
+    )
+
+    io_grp.add_argument(
+        "--target-decoder",
+        type=str,
+        default=None,
+        metavar="PATH",
+        help=(
+            "Path to a target-decoder CSV that maps the ``target`` column of the "
+            "bean element result to amino-acid coordinates.  "
+            "Required columns: ``target``, ``aapos`` (int), ``aaref`` (str), "
+            "``aaalt`` (str, use ``Z`` or ``*`` for stop-gain).  "
+            "Use this when ``bean run`` was executed without the ``bean filter`` "
+            "AA-translation step, leaving the ``target`` column in a "
+            "non-parseable format such as ``16200_G_D``."
         ),
     )
 

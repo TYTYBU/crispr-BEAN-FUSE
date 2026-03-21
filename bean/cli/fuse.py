@@ -53,6 +53,8 @@ def main(args) -> None:
     if args.mu_sd_max is not None:
         logger.info(f"mu_sd filter:  ≤ {args.mu_sd_max}")
     logger.info(f"Include LoF:   {args.include_lof}")
+    if args.target_decoder:
+        logger.info(f"Target decoder:{args.target_decoder}")
     if args.dss:
         logger.info(f"DSSP file:     {args.dss}")
         if args.dssp_offset:
@@ -72,6 +74,7 @@ def main(args) -> None:
             include_lof=args.include_lof,
             dss_path=args.dss,
             dssp_offset=args.dssp_offset,
+            target_decoder=args.target_decoder,
             lower_bound=args.lower_bound,
             upper_bound=args.upper_bound,
             gene_name=args.gene,
