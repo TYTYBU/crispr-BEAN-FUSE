@@ -6,112 +6,91 @@
 [![Documentation](https://github.com/pinellolab/crispr-bean/actions/workflows/documentation.yml/badge.svg)](https://github.com/pinellolab/crispr-bean/actions/workflows/documentation.yml)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 
-`bean` improves CRISPR pooled screen analysis by 1) unconfounding variable per-guide editing outcome by considering genotypic outcome from *reporter* sequence and 2) through accurate modeling of screen procedure.
-
+Variant effect estimation from base editing screens, with structure-informed score denoising via FUSE.
 
 <img src="docs/assets/summary.png" alt="Reporter construct" width="700"/>
 
-## Overview
-`bean` supports end-to-end analysis of pooled sorting screens, with or without reporter.  
-
-<img src="docs/assets/dag_bean_v2.svg" alt="dag_bean_v2.svg" height="650"/>  
-
-`bean` subcommands include the following: Click on the [`links`]() to see the full documentation.
-1. [`count`](https://pinellolab.github.io/crispr-bean/count.html), [`count-samples`](https://pinellolab.github.io/crispr-bean/count_samples.html): Base-editing-aware **mapping** of guide, optionally with reporter from `.fastq` files.
-    *   [`create-screen`](https://pinellolab.github.io/crispr-bean/create_screen.html) creates minimal ReporterScreen object from flat gRNA count file. Note that this way, allele counts are not included and many functionalities involving allele and edit counts are not supported.
-2. [`profile`](https://pinellolab.github.io/crispr-bean/profile.html): Profile editing preferences of your editor.  
-3. [`qc`](https://pinellolab.github.io/crispr-bean/qc.html): Quality control report and filtering out / masking of aberrant sample and guides  
-4. [`filter`](https://pinellolab.github.io/crispr-bean/filter.html): Filter reporter alleles; essential for `tiling` mode that allows for all alleles generated from gRNA.
-5. [`run`](https://pinellolab.github.io/crispr-bean/run.html): Quantify targeted variants' effect sizes from screen data. **See more about the [model](https://pinellolab.github.io/crispr-bean/model.html) & [output](https://pinellolab.github.io/crispr-bean/run.html#output)**
-6. `fuse`: Compute **FUSE** (Functional Score Using Structural Ensemble) scores from a `bean run` element result CSV. Denoises per-variant functional scores by combining a James-Stein positional estimate with FUNSUM substitution matrix scores. Optionally uses secondary-structure-specific FUNSUM when a DSSP file is supplied.
-* Screen data is saved as [`ReporterScreen` object](https://pinellolab.github.io/crispr-bean/reporterscreen.html) in the pipeline.
-BEAN stores mapped gRNA and allele counts in `ReporterScreen` object which is compatible with [AnnData](https://anndata.readthedocs.io/en/latest/index.html). 
-
-## Installation 
-First install [PyTorch](https://pytorch.org/get-started/).
-Then download from PyPI:
+## Installation
+First install [PyTorch](https://pytorch.org/get-started/), then:
 ```bash
 pip install crispr-bean
 ```
 
-For the latest version of `bean` (and for the test files in `tests/data`), install from Github:
+For the latest version (and test data), install from source:
 ```bash
 git clone https://github.com/pinellolab/crispr-bean.git
-cd crispr-bean
-pip install -e .
+cd crispr-bean && pip install -e .
 ```
 
-## Documentaton
-See the [documentation](https://pinellolab.github.io/crispr-bean/) for tutorials and API references.
-
-## Tutorials
-| [Library design](#pipeline-run-options-by-library-design) | Selection | Reporter |  Tutorial link |
-|---------------| -------------- | --------- | -------- |
-| GWAS variant library | FACS sorting | Yes/No | [GWAS variant screen](https://pinellolab.github.io/crispr-bean/tutorial_gwas.html) 
-| Coding sequence tiling libarary | FACS sorting | Yes/No | [Coding sequence tiling screen](https://pinellolab.github.io/crispr-bean/tutorial_cds.html) 
-| GWAS variant library | Survival / Proliferation | Yes/No |  [GWAS variant screen](https://pinellolab.github.io/crispr-bean/tutorial_prolif_gwas.html)
-| Coding sequence tiling libarary | Survival / Proliferation | Yes/No | [Coding sequence tiling screen](https://pinellolab.github.io/crispr-bean/tutorial_prolif_cds.html)
-| Perturbation library without reporter | FACS sorting | No | [No reporter screen](https://pinellolab.github.io/crispr-bean/tutorial_no_edit.html)
-| Integration of disjoint libraries | Any | Any | [Feeding custom prior](https://pinellolab.github.io/crispr-bean/tutorial_custom_prior.html)
-
-Also see notebook that visualizes screen analysis result [here](https://github.com/pinellolab/crispr-bean/blob/main/docs/visualize_var.ipynb).
-
-For a complete end-to-end walkthrough of the full pipeline including `bean fuse`, see [`crispr_bean_workflow.ipynb`](crispr_bean_workflow.ipynb).
-
-
-### Library design: variant or tiling?
-The `bean filter` and `bean run` steps depend on the type of gRNA library design, where BEAN supports two modes of running.
-<img src="docs/assets/library_design.png" alt="variant library design" width="700"/>  
-
-1. `variant` library: Several gRNAs tile each of the targeted variants. Only the editing rate of the target variant is considered and the bystander effects are ignored.  
-    * :heavy_plus_sign: Increase power for your target variant, as the signal is not distributed across likely no-effect bystanders.
-    * :heavy_minus_sign: Ignores potential bystander effect
-    * :heavy_check_mark: Suitable for noncoding GWAS variant screens.
-
-
-2. `tiling` library: gRNA densely tiles a long region (e.g. gene(s), exon(s), coding sequence(s)). Bystander edits are considered to obtain alleles with significant fractions. Edited alleles can be "translated" to output coding variants.
-    * :heavy_plus_sign: Considers bystander effect
-    * :heavy_minus_sign: If the library results in alleles that are not diverse enough across gRNAs, signal will likely be diluted to all variants in that alleles. (ex. Allele "GGGGG" with a single gRNA score will distribute scores across 5 G's.)
-    * :heavy_check_mark: Suitable for coding variant screens with tiling design.
-
-## Using BEAN as Python module
-```
-import bean as be
-cdata = be.read_h5ad("bean_counts_sample.h5ad")
-```
-Python package `bean` supports multiple data wrangling functionalities for `ReporterScreen` objects. See the [**ReporterScreen API tutorial**](docs/ReporterScreen_api.ipynb) for more detail.
-
-## `bean fuse` — FUSE score computation
-
-For coding tiling screens, `bean fuse` denoises per-variant scores from `bean run` using the FUNSUM substitution matrix and optional protein secondary structure.
+## bean run
+Quantify variant effect sizes from screen data.
 
 ```bash
-# Basic usage (auto-detects mu_z_adj or mu_z as the raw score)
+# Variant library (e.g. GWAS SNPs)
+bean run variant   my_screen.h5ad --output-prefix results/
+
+# Coding tiling library
+bean run tiling    my_screen.h5ad --output-prefix results/
+
+# Survival / proliferation screen
+bean run survival  my_screen.h5ad --output-prefix results/
+```
+
+See the [model](https://pinellolab.github.io/crispr-bean/model.html) and [output format](https://pinellolab.github.io/crispr-bean/run.html#output) documentation for details.
+
+## bean fuse
+Denoise per-variant scores from `bean run` using the FUNSUM substitution matrix and optional protein secondary structure (FUSE — Functional Score Using Structural Ensemble).
+
+```bash
+# Basic (auto-detects mu_z_adj or mu_z as raw score)
 bean fuse bean_element_result.MixtureNormal.csv -o results/
 
-# With secondary-structure-specific FUNSUM and mu_sd filter
+# With secondary-structure-specific FUNSUM and confidence filter
 bean fuse bean_element_result.MixtureNormal.csv \
-  --dss structure.dss \
-  --mu-sd-max 1.0 \
-  -o results/
+  --dss structure.dss --dssp-offset 21 \
+  --mu-sd-max 1.0 -o results/
 
-# Exclude stop-gain variants
+# If bean run was run without bean filter (target column not yet AA-translated)
 bean fuse bean_element_result.MixtureNormal.csv \
-  --exclude-lof \
-  --dss structure.dss \
+  --target-decoder LDLR_target_decoder.csv \
+  --dss structure.dss --dssp-offset 21 \
   -o results/
 ```
 
 Output columns: `gene`, `aapos`, `aaref`, `aaalt`, `functional_class`, `raw_score`, `norm_raw_score`, `pos_score`, `sub_score`, `sub_score_ss`, `FUSE_score`, `FUSE_SS_score`.
 
-## Run time
-* Installation takes 14.4 mins after pytorch installation with pytorch in Dell XPS 13 Ubuntu WSL.
-* `bean run` takes 4.6 mins with `--scale-by-acc` tag in Dell XPS 13 Ubuntu WSL for variant screen dataset with 3455 guides and 6 replicates with 4 sorting bins.
-* Full pipeline takes 90.1s in GitHub Action for toy dataset of 2 replicates and 30 guides.
+Example files for the LDLR peDMS dataset are in [`examples/LDLR/`](examples/LDLR/).
 
-## Contributing
-See [CHANGELOG](CHANGELOG.md) for recent updates. If you have questions or feature request, please open an issue. Please feel free to send a pull request.
+## Full pipeline
+
+<img src="docs/assets/dag_bean_v2.svg" alt="dag_bean_v2.svg" height="500"/>
+
+| Step | Command | Description |
+|------|---------|-------------|
+| 1 | [`count` / `count-samples`](https://pinellolab.github.io/crispr-bean/count.html) | Map guides (and reporter) from FASTQ |
+| 2 | [`profile`](https://pinellolab.github.io/crispr-bean/profile.html) | Profile editor preferences |
+| 3 | [`qc`](https://pinellolab.github.io/crispr-bean/qc.html) | Quality control and sample/guide filtering |
+| 4 | [`filter`](https://pinellolab.github.io/crispr-bean/filter.html) | Filter alleles; translates coding variants for tiling screens |
+| 5 | [`run`](https://pinellolab.github.io/crispr-bean/run.html) | Estimate variant effect sizes |
+| 6 | `fuse` | Denoise scores with FUNSUM + optional secondary structure |
+
+For a complete walkthrough see [`crispr_bean_workflow.ipynb`](crispr_bean_workflow.ipynb).
+For tutorials by screen type see the [documentation](https://pinellolab.github.io/crispr-bean/).
+
+### Variant vs tiling library design
+
+**Variant** — several gRNAs per target variant; bystander effects ignored. Best for noncoding GWAS screens.
+**Tiling** — dense gRNA tiling of a region; all alleles considered and translated to coding variants. Best for coding sequence DMS-style screens.
+
+## Python API
+```python
+import bean as be
+cdata = be.read_h5ad("bean_counts_sample.h5ad")
+```
+See the [ReporterScreen API tutorial](docs/ReporterScreen_api.ipynb) for details.
 
 ## Citation
-If you have used BEAN for your analysis, please cite:  
-Ryu, J., Barkal, S., Yu, T. et al. Joint genotypic and phenotypic outcome modeling improves base editing variant effect quantification. Nat Genet (2024). https://doi.org/10.1038/s41588-024-01726-6
+Ryu, J., Barkal, S., Yu, T. et al. Joint genotypic and phenotypic outcome modeling improves base editing variant effect quantification. *Nat Genet* (2024). https://doi.org/10.1038/s41588-024-01726-6
+
+## Contributing
+See [CHANGELOG](CHANGELOG.md) for recent updates. Questions and PRs welcome — please open an issue.
