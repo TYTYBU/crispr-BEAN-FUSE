@@ -45,6 +45,39 @@ _SS_GROUP: dict[str, str] = {
 }
 
 
+def _resolve_sd_col(df: pd.DataFrame, score_col: str) -> Optional[str]:
+    """Return the SD column that corresponds to *score_col*, or None.
+
+    Derives the name by replacing ``_z`` with ``_sd`` in *score_col*
+    (e.g. ``mu_z_adj`` → ``mu_sd_adj``, ``mu_z`` → ``mu_sd``).
+    Falls back to ``mu_sd`` if the derived name is absent, and returns
+    ``None`` with a warning if neither column exists.
+    """
+    # Derive expected SD column: mu_z_adj → mu_sd_adj, mu_z_scaled → mu_sd_scaled
+    derived = score_col.replace("_z", "_sd")
+    if derived != score_col and derived in df.columns:
+        return derived
+
+    # Generic fallback
+    if "mu_sd" in df.columns:
+        if derived != score_col and derived not in df.columns:
+            warnings.warn(
+                f"Expected SD column '{derived}' for score column '{score_col}' "
+                f"not found. Falling back to 'mu_sd'.",
+                UserWarning,
+                stacklevel=3,
+            )
+        return "mu_sd"
+
+    warnings.warn(
+        f"No SD column found for score column '{score_col}' "
+        f"(tried '{derived}' and 'mu_sd') — skipping mu_sd filter.",
+        UserWarning,
+        stacklevel=3,
+    )
+    return None
+
+
 def _resolve_raw_score_col(df: pd.DataFrame, raw_score_col: Optional[str]) -> str:
     """Pick the raw-score column, preferring mu_z_adj, then mu_z."""
     if raw_score_col is not None:
@@ -149,6 +182,7 @@ def calculate_fuse_scores(
     lower_bound: float = 0.1,
     upper_bound: float = 0.9,
     gene_name: Optional[str] = None,
+    scale_fuse_scores: bool = False,
 ) -> pd.DataFrame:
     """Compute FUSE scores from a bean element result CSV.
 
@@ -197,6 +231,13 @@ def calculate_fuse_scores(
         Optional gene label to attach to all variants (used in the
         ``gene_aa_str`` identifier column).  Inferred from the edit strings
         when not supplied.
+    scale_fuse_scores:
+        If *True*, add ``FUSE_score_norm`` and ``FUSE_SS_score_norm`` columns
+        by re-scaling ``FUSE_score`` and ``FUSE_SS_score`` so that the median
+        of synonymous variants maps to 0 and the median of LoF variants maps
+        to 1.  Requires both SYN and LOF variants to be present in the output;
+        a warning is issued and the columns are omitted if either group is
+        absent.  Default: *False*.
 
     Returns
     -------
@@ -206,7 +247,9 @@ def calculate_fuse_scores(
         ``gene``, ``aapos``, ``aaref``, ``aaalt``, ``functional_class``,
         ``raw_score``, ``norm_raw_score``,
         ``pos_score``, ``sub_score``, ``sub_score_ss`` (if DSSP available),
-        ``FUSE_score``, ``FUSE_SS_score``, ``gene_aa_str``.
+        ``FUSE_score``, ``FUSE_SS_score``,
+        ``FUSE_score_norm``, ``FUSE_SS_score_norm`` (if ``scale_fuse_scores``),
+        ``gene_aa_str``.
     """
     # ------------------------------------------------------------------
     # 1. Load data
@@ -220,20 +263,16 @@ def calculate_fuse_scores(
     logger.info(f"Using score column: '{score_col}'")
 
     # ------------------------------------------------------------------
-    # 3. Optional mu_sd filter
+    # 3. Optional SD filter (uses the SD column matching the score column)
     # ------------------------------------------------------------------
     if mu_sd_max is not None:
-        if "mu_sd" not in df_raw.columns:
-            warnings.warn(
-                "'mu_sd' column not found – skipping mu_sd filter.",
-                UserWarning,
-                stacklevel=2,
-            )
-        else:
+        sd_col = _resolve_sd_col(df_raw, score_col)
+        if sd_col is not None:
             n_before = len(df_raw)
-            df_raw = df_raw[df_raw["mu_sd"] <= mu_sd_max].copy()
+            df_raw = df_raw[df_raw[sd_col] <= mu_sd_max].copy()
             logger.info(
-                f"mu_sd filter (≤ {mu_sd_max}): kept {len(df_raw)}/{n_before} rows."
+                f"SD filter on '{sd_col}' (≤ {mu_sd_max}): "
+                f"kept {len(df_raw)}/{n_before} rows."
             )
 
     # ------------------------------------------------------------------
@@ -364,7 +403,7 @@ def calculate_fuse_scores(
     # ------------------------------------------------------------------
     # 9. Load FUNSUM matrices
     # ------------------------------------------------------------------
-    df_funsum    = load_funsum(include_lof=include_lof)
+    df_funsum = load_funsum(include_lof=include_lof)
     ls_funsum_ss = load_funsum_ss(include_lof=include_lof)
 
     # Allowed alt AAs
@@ -475,7 +514,49 @@ def calculate_fuse_scores(
     df_out.loc[missing_ss, "sub_score_ss"]  = df_out.loc[missing_ss, "sub_score"]
 
     # ------------------------------------------------------------------
-    # 14. Final column selection
+    # 14. Optional FUSE score normalisation (SYN=0, LOF=1)
+    # ------------------------------------------------------------------
+    if scale_fuse_scores:
+        syn_mask = df_out["functional_class"] == "SYN"
+        lof_mask = df_out["functional_class"] == "LOF"
+        n_syn = syn_mask.sum()
+        n_lof = lof_mask.sum()
+
+        if n_syn == 0 or n_lof == 0:
+            warnings.warn(
+                "scale_fuse_scores=True requires both SYN and LOF variants in "
+                "the FUSE output, but "
+                + (f"no SYN variants were found." if n_syn == 0 else "")
+                + (f"no LOF variants were found." if n_lof == 0 else "")
+                + " FUSE_score_norm / FUSE_SS_score_norm will not be computed.",
+                UserWarning,
+                stacklevel=2,
+            )
+        else:
+            for raw_col, norm_col in [
+                ("FUSE_score",    "FUSE_score_norm"),
+                ("FUSE_SS_score", "FUSE_SS_score_norm"),
+            ]:
+                median_syn = df_out.loc[syn_mask, raw_col].median()
+                median_lof = df_out.loc[lof_mask, raw_col].median()
+                denom = median_lof - median_syn
+                if denom == 0 or np.isnan(denom):
+                    warnings.warn(
+                        f"Cannot normalise '{raw_col}': median LOF == median SYN "
+                        f"({median_lof:.4g}).  '{norm_col}' will not be computed.",
+                        UserWarning,
+                        stacklevel=2,
+                    )
+                else:
+                    df_out[norm_col] = (df_out[raw_col] - median_syn) / denom
+                    logger.info(
+                        f"{norm_col}: median SYN = {median_syn:.4g}, "
+                        f"median LOF = {median_lof:.4g} "
+                        f"(n_syn={n_syn}, n_lof={n_lof})."
+                    )
+
+    # ------------------------------------------------------------------
+    # 15. Final column selection
     # ------------------------------------------------------------------
     col_order = [
         "gene", "aapos", "aaref", "aaalt", "functional_class",
@@ -483,6 +564,7 @@ def calculate_fuse_scores(
         "ss", "acc",
         "pos_score", "sub_score", "sub_score_ss",
         "FUSE_score", "FUSE_SS_score",
+        "FUSE_score_norm", "FUSE_SS_score_norm",
         "gene_aa_str",
     ]
     df_out = df_out[[c for c in col_order if c in df_out.columns]]

@@ -61,6 +61,8 @@ def main(args) -> None:
             logger.info(f"DSSP offset:   {args.dssp_offset:+d}")
     else:
         logger.info("DSSP file:     not provided (using overall FUNSUM only)")
+    if args.scale_fuse_scores:
+        logger.info("Scale FUSE:    enabled (SYN=0, LOF=1 normalisation)")
     logger.info(f"Output:        {out_path}")
 
     from bean.fuse.score import calculate_fuse_scores
@@ -78,6 +80,7 @@ def main(args) -> None:
             lower_bound=args.lower_bound,
             upper_bound=args.upper_bound,
             gene_name=args.gene,
+            scale_fuse_scores=args.scale_fuse_scores,
         )
     except Exception as exc:
         logger.error(f"FUSE scoring failed: {exc}")

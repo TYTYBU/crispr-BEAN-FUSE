@@ -177,6 +177,21 @@ def add_fuse_args(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
         ),
     )
 
+    norm_grp.add_argument(
+        "--scale-fuse",
+        dest="scale_fuse_scores",
+        action="store_true",
+        default=False,
+        help=(
+            "After computing FUSE_score and FUSE_SS_score, add normalised "
+            "columns FUSE_score_norm and FUSE_SS_score_norm by rescaling so "
+            "that the median of synonymous variants maps to 0 and the median "
+            "of LoF variants maps to 1.  Requires both SYN and LOF variants "
+            "to be present in the output; a warning is issued and the columns "
+            "are omitted if either group is absent."
+        ),
+    )
+
     # ── Misc ──────────────────────────────────────────────────────────────────
     misc_grp = parser.add_argument_group("Miscellaneous")
 

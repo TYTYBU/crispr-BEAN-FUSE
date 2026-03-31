@@ -1,4 +1,8 @@
 # Changelog
+## 1.3.1
+* Add `--scale-fuse` flag to `bean fuse` (and `scale_fuse_scores` parameter in the Python API)
+  * After computing `FUSE_score` and `FUSE_SS_score`, optionally adds `FUSE_score_norm` and `FUSE_SS_score_norm` columns by rescaling so that the median of synonymous variants = 0 and the median of LoF variants = 1
+  * Normalisation is skipped (with a warning) when either SYN or LOF variants are absent from the output
 ## 1.3.0
 * Add `bean fuse` subcommand — computes FUSE (Functional Score Using Structural Ensemble) scores from a `bean run` element result CSV
   * James-Stein positional shrinkage estimator + FUNSUM substitution matrix scoring
